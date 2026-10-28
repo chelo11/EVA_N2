@@ -1,0 +1,16 @@
+# Excepciones del gate de Trivy (riesgo aceptado, con fecha de expiracion).
+# Solo las usa el paso "Trivy - BLOQUEAR" del pipeline; el reporte SARIF de la
+# pestana Security las sigue mostrando. Al vencer la fecha, el gate vuelve a fallar
+# y obliga a revisar la excepcion.
+#
+# spring-webmvc 6.2.19 (ultima version de Spring Framework 6.2 / Spring Boot 3.5):
+# la correccion solo existe en Spring Framework 7.0.9 (Spring Boot 4).
+# ms-vehiculos no usa XsltView ni respuestas Server-Sent Events con fragments.
+
+# GHSA-pc63-qcmh-9cmg - Improper Path Limitation en XsltView
+CVE-2026-47884 exp:2027-03-31
+GHSA-pc63-qcmh-9cmg exp:2027-03-31
+
+# GHSA-j9f9-w8pj-32f8 - Corrupcion de stream SSE al renderizar fragments
+CVE-2026-47890 exp:2027-03-31
+GHSA-j9f9-w8pj-32f8 exp:2027-03-31

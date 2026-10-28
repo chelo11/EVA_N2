@@ -1,0 +1,54 @@
+# Entorno de DESARROLLO local (API + MySQL) con Docker Compose.
+# Produccion y staging usan Kubernetes (carpeta k8s/).
+#
+#   cp .env.example .env      # y editar las contrasenas
+#   docker compose up --build
+#   -> http://localhost:9004/swagger-ui/index.html
+name: ms-vehiculos
+
+services:
+  mysql:
+    image: mysql:8.4.13
+    command: ["--performance-schema=OFF", "--max-connections=60"]
+    environment:
+      MYSQL_DATABASE: vehiculos
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD en .env}
+      MYSQL_USER: ${DB_USERNAME:?Define DB_USERNAME en .env}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Define DB_PASSWORD en .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  api:
+    build: ./ms-vehiculos
+    image: ms-vehiculos:local
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/vehiculos?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "9004:9004"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 768M
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

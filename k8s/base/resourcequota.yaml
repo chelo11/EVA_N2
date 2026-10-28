@@ -1,0 +1,17 @@
+# Gobernanza: techo de recursos del namespace. Aunque el HPA escale al maximo
+# (4 pods + 1 extra durante un rolling update) y MySQL, no se supera este limite.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: cuota-vehiculos
+spec:
+  hard:
+    pods: "10"
+    requests.cpu: "2"
+    requests.memory: 3Gi
+    limits.cpu: "8"
+    limits.memory: 6Gi
+    persistentvolumeclaims: "2"
+    requests.storage: 5Gi
+    services.loadbalancers: "0"
+    services.nodeports: "0"

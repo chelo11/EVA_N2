@@ -1,0 +1,10 @@
+# Durante mantenciones voluntarias (drain del nodo, upgrades) siempre queda al menos 1 pod atendiendo.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ms-vehiculos
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ms-vehiculos

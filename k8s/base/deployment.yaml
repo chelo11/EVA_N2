@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ms-vehiculos
+  labels:
+    app.kubernetes.io/name: ms-vehiculos
+    app.kubernetes.io/component: api
+  annotations:
+    # El pipeline reemplaza este valor por "commit <sha> (run <id>, por <autor>)" (ver scripts/render-manifests.sh),
+    # asi "kubectl rollout history" muestra que commit genero cada revision.
+    kubernetes.io/change-cause: "despliegue manual"
+spec:
+  # Sin "replicas": el numero de pods lo controla el HPA (ver hpa.yaml).
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0       # nunca baja un pod antes de que el nuevo este listo
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ms-vehiculos
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ms-vehiculos
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      # 10 s de preStop + 20 s de apagado graceful de Spring + margen
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # La API necesita la BD al arrancar (Hibernate valida el esquema): espera a que MySQL acepte conexiones.
+        - name: esperar-mysql
+          image: busybox:1.38.0
+          command: ["sh", "-c", "until nc -z -w 2 mysql 3306; do echo 'esperando a MySQL...'; sleep 3; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: ms-vehiculos
+          image: ms-vehiculos     # los overlays la reemplazan por ghcr.io/<owner>/ms-vehiculos:<sha>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9004
+          envFrom:
+            - configMapRef:
+                name: ms-vehiculos-config
+          env:
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: password
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          # startupProbe da hasta 3 min para el primer arranque; luego toman el control liveness/readiness.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Al terminar un pod, espera 10 s antes del SIGTERM para que Service/Traefik dejen
+          # de enviarle trafico (recomendacion de Spring Boot para Kubernetes).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Tomcat necesita un directorio temporal escribible; el resto del FS es de solo lectura.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

@@ -1,0 +1,510 @@
+# =============================================================================
+# Pipeline CI/CD del microservicio ms-vehiculos
+#
+#   PR / push ─► 1 Pruebas + cobertura ─► 2 SonarCloud (Quality Gate)
+#                 └► Revision de dependencias (solo PR)
+#             ─► 3 Imagen Docker + Trivy ─► 4 Staging (kind)
+#             ─► 5 Produccion (k3s en AWS EC2)   [solo main]
+#
+# Cada etapa BLOQUEA a las siguientes si falla. Todas las acciones de terceros
+# estan fijadas por SHA de commit (no por tag), ver README > Seguridad.
+# =============================================================================
+name: CI/CD ms-vehiculos
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# En un PR, un push nuevo cancela la ejecucion anterior; en main nunca se corta un despliegue.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Minimo privilegio: el GITHUB_TOKEN solo lee; cada job pide lo que necesita.
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ms-vehiculos
+  IMAGE_TAG: ${{ github.sha }}
+  JAVA_VERSION: "21"
+  K8S_NAMESPACE: vehiculos
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  test:
+    name: 1 · Pruebas unitarias y cobertura
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ms-vehiculos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configurar Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Compilar + pruebas JUnit + umbral de cobertura (JaCoCo)
+        run: ./mvnw -B -ntp verify
+
+      - name: Resumen de cobertura
+        if: always()
+        run: |
+          CSV=target/site/jacoco/jacoco.csv
+          [[ -f "$CSV" ]] || exit 0
+          awk -F, 'NR > 1 { bm += $6; bc += $7; lm += $8; lc += $9 }
+            END {
+              printf "### Cobertura de pruebas (JaCoCo)\n\n| Metrica | Cobertura | Minimo exigido |\n|---|---|---|\n"
+              printf "| Lineas | %.1f%% (%d/%d) | 80%% |\n", (lc + lm ? 100 * lc / (lc + lm) : 100), lc, lc + lm
+              printf "| Ramas | %.1f%% (%d/%d) | 70%% |\n", (bc + bm ? 100 * bc / (bc + bm) : 100), bc, bc + bm
+            }' "$CSV" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar reportes de pruebas y cobertura
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reportes-pruebas
+          path: |
+            ms-vehiculos/target/surefire-reports/
+            ms-vehiculos/target/site/jacoco/
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  sonarcloud:
+    name: 2 · Calidad y seguridad del codigo (SonarCloud)
+    needs: test
+    # Los PR de Dependabot no reciben los secrets del repositorio (SONAR_TOKEN)
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ms-vehiculos
+    steps:
+      - name: Checkout (historial completo para el analisis de codigo nuevo)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configurar Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Analisis SonarCloud + Quality Gate (falla si no se aprueba)
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: >-
+          ./mvnw -B -ntp verify
+          org.sonarsource.scanner.maven:sonar-maven-plugin:5.8.0.7211:sonar
+          -Dsonar.qualitygate.wait=true
+          -Dsonar.qualitygate.timeout=300
+
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: Revision de dependencias del PR
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bloquear dependencias nuevas con vulnerabilidades HIGH o CRITICAL
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  # ---------------------------------------------------------------------------
+  docker:
+    name: 3 · Imagen Docker + escaneo de vulnerabilidades (Trivy)
+    needs: [test, sonarcloud, dependency-review]
+    # Corre si nada fallo (sonarcloud o dependency-review pueden saltarse segun el evento)
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write   # subir el resultado de Trivy a la pestana Security
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Metadatos OCI (commit, repo y fecha quedan grabados en la imagen)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.IMAGE_TAG }}
+
+      - name: Construir imagen (multi-stage, con cache de capas)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ms-vehiculos
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy - reporte completo en formato SARIF
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+
+      - name: Subir resultados a GitHub Code Scanning
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-imagen
+
+      - name: Trivy - BLOQUEAR si hay vulnerabilidades CRITICAL/HIGH con parche disponible
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Excepciones documentadas y con fecha de expiracion (ver el archivo)
+          trivyignores: .github/trivy/trivyignore
+          exit-code: "1"
+
+      - name: Imagenes de terceros que corren en el cluster
+        id: terceros
+        run: |
+          echo "mysql=$(grep -oE 'mysql:[0-9][0-9.]*' k8s/base/mysql.yaml | head -1)" >> "$GITHUB_OUTPUT"
+          echo "busybox=$(grep -oE 'busybox:[0-9][0-9.]*' k8s/base/deployment.yaml | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy - reporte de la imagen de MySQL (informativo)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.terceros.outputs.mysql }}
+          format: sarif
+          output: trivy-mysql.sarif
+          exit-code: "0"
+
+      - name: Subir resultados de MySQL a Code Scanning
+        if: always() && hashFiles('trivy-mysql.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-mysql.sarif
+          category: trivy-mysql
+
+      - name: Trivy - reporte de la imagen de busybox (informativo)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.terceros.outputs.busybox }}
+          format: sarif
+          output: trivy-busybox.sarif
+          exit-code: "0"
+
+      - name: Subir resultados de busybox a Code Scanning
+        if: always() && hashFiles('trivy-busybox.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-busybox.sarif
+          category: trivy-busybox
+
+      - name: Trivy - SBOM (inventario de componentes, CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: cyclonedx
+          output: sbom-ms-vehiculos.cdx.json
+
+      - name: Exportar la imagen (la MISMA se promueve a staging y produccion)
+        run: |
+          docker save "$IMAGE_NAME:$IMAGE_TAG" -o ms-vehiculos.tar
+          {
+            echo "### Imagen construida"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Imagen | \`$IMAGE_NAME:$IMAGE_TAG\` |"
+            echo "| ID | \`$(docker image inspect --format '{{.Id}}' "$IMAGE_NAME:$IMAGE_TAG")\` |"
+            echo "| Tamano | $(docker image inspect --format '{{.Size}}' "$IMAGE_NAME:$IMAGE_TAG" | awk '{printf "%.0f MB", $1/1024/1024}') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar imagen como artefacto
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: imagen-docker
+          path: ms-vehiculos.tar
+          retention-days: 7
+
+      - name: Guardar SBOM como artefacto
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom-ms-vehiculos.cdx.json
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    name: 4 · Despliegue en staging (Kubernetes efimero con kind)
+    needs: docker
+    # Condicion explicita: sin ella GitHub aplica success() sobre TODOS los ancestros y,
+    # como dependency-review se salta en push y sonarcloud en PRs de Dependabot, este job tambien se saltaria.
+    if: ${{ !cancelled() && needs.docker.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Descargar la imagen construida
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: imagen-docker
+          path: ${{ runner.temp }}/imagen
+
+      - name: Crear cluster Kubernetes efimero (kind)
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.33.0
+          node_image: kindest/node:v1.36.4   # misma version menor que k3s en produccion
+          cluster_name: staging
+          wait: 120s
+
+      - name: Cargar la imagen en el cluster
+        run: kind load image-archive "$RUNNER_TEMP/imagen/ms-vehiculos.tar" --name staging
+
+      - name: Renderizar manifiestos de staging y produccion con la imagen del commit
+        run: |
+          mkdir -p "$RUNNER_TEMP/manifiestos"
+          CAUSA="commit ${GITHUB_SHA::7} (run ${GITHUB_RUN_ID}, por ${GITHUB_ACTOR})"
+          bash scripts/render-manifests.sh staging    "$IMAGE_NAME" "$IMAGE_TAG" "$CAUSA" > "$RUNNER_TEMP/manifiestos/staging.yaml"
+          bash scripts/render-manifests.sh production "$IMAGE_NAME" "$IMAGE_TAG" "$CAUSA" > "$RUNNER_TEMP/manifiestos/production.yaml"
+
+      - name: Crear namespace y credenciales efimeras de MySQL
+        run: |
+          kubectl apply -f k8s/base/namespace.yaml
+          kubectl -n "$K8S_NAMESPACE" create secret generic mysql-credentials \
+            --from-literal=root-password="$(openssl rand -hex 24)" \
+            --from-literal=username=vehiculos \
+            --from-literal=password="$(openssl rand -hex 24)"
+
+      - name: Validar los manifiestos de PRODUCCION contra el API server (dry-run)
+        run: kubectl -n "$K8S_NAMESPACE" apply --dry-run=server -f "$RUNNER_TEMP/manifiestos/production.yaml"
+
+      - name: Desplegar en staging
+        run: kubectl -n "$K8S_NAMESPACE" apply -f "$RUNNER_TEMP/manifiestos/staging.yaml"
+
+      - name: Esperar el rollout (MySQL + API)
+        run: |
+          kubectl -n "$K8S_NAMESPACE" rollout status statefulset/mysql --timeout=300s
+          kubectl -n "$K8S_NAMESPACE" rollout status deployment/ms-vehiculos --timeout=420s
+          kubectl -n "$K8S_NAMESPACE" get pods,hpa -o wide
+
+      - name: Pruebas de humo + CRUD de punta a punta contra staging
+        run: |
+          kubectl -n "$K8S_NAMESPACE" port-forward svc/ms-vehiculos 8080:80 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+          sleep 3
+          bash scripts/smoke-test.sh http://localhost:8080 --crud
+
+      - name: Diagnostico del cluster
+        if: failure()
+        run: |
+          kubectl -n "$K8S_NAMESPACE" get all,pvc -o wide || true
+          kubectl -n "$K8S_NAMESPACE" get events --sort-by=.lastTimestamp || true
+          kubectl -n "$K8S_NAMESPACE" describe pods || true
+          kubectl -n "$K8S_NAMESPACE" logs statefulset/mysql --tail=100 || true
+          kubectl -n "$K8S_NAMESPACE" logs deployment/ms-vehiculos --all-containers --tail=200 || true
+
+      - name: Guardar manifiestos renderizados (trazabilidad)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifiestos
+          path: ${{ runner.temp }}/manifiestos/
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    name: 5 · Despliegue en produccion (k3s en AWS EC2)
+    needs: deploy-staging
+    if: >-
+      ${{ !cancelled() && needs.deploy-staging.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write          # publicar la imagen en GHCR
+    environment:
+      name: production
+      url: ${{ steps.registro.outputs.url }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      # Recomendado: EC2_HOST como Variable (la IP es publica). Si es Secret, GitHub la
+      # enmascara y no muestra el enlace del environment.
+      EC2_HOST: ${{ vars.EC2_HOST || secrets.EC2_HOST }}
+      EC2_USER: ${{ vars.EC2_USER || secrets.EC2_USER || 'ubuntu' }}
+      # /var/tmp esta en disco; /tmp en Ubuntu reciente es tmpfs (RAM del nodo)
+      REMOTE_DIR: /var/tmp/deploy-${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Descargar la imagen validada en staging
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: imagen-docker
+          path: ${{ runner.temp }}/imagen
+
+      - name: Descargar los manifiestos renderizados
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: manifiestos
+          path: ${{ runner.temp }}/manifiestos
+
+      - name: Iniciar sesion en GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar la imagen en GHCR (tag inmutable = SHA del commit)
+        run: |
+          docker load -i "$RUNNER_TEMP/imagen/ms-vehiculos.tar"
+          docker push "$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Configurar acceso SSH a la instancia
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          [[ -n "$EC2_HOST" ]] || { echo "::error::Falta definir EC2_HOST (secret o variable)"; exit 1; }
+          [[ -n "$EC2_SSH_KEY" ]] || { echo "::error::Falta el secret EC2_SSH_KEY"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          # La huella del host se guarda bajo un alias fijo (no la IP), asi sobrevive a los
+          # cambios de IP del laboratorio. Si existe EC2_KNOWN_HOSTS se usa esa huella fijada.
+          if [[ -n "$EC2_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$EC2_KNOWN_HOSTS" | awk 'NF && $1 !~ /^#/ { $1 = "ec2-produccion"; print }' > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 20 -t ed25519 "$EC2_HOST" 2>/dev/null \
+              | awk 'NF && $1 !~ /^#/ { $1 = "ec2-produccion"; print }' > ~/.ssh/known_hosts || true
+          fi
+          [[ -s ~/.ssh/known_hosts ]] || {
+            echo "::error::No se pudo contactar $EC2_HOST:22 (¿laboratorio iniciado? ¿EC2_HOST actualizado? ¿puerto 22 abierto?)"
+            exit 1
+          }
+          cat > ~/.ssh/config <<EOF
+          Host ec2
+            HostName $EC2_HOST
+            HostKeyAlias ec2-produccion
+            User $EC2_USER
+            IdentityFile ~/.ssh/ec2.pem
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 20
+            ServerAliveInterval 15
+          EOF
+          chmod 600 ~/.ssh/config
+          ssh ec2 'echo "Conectado a $(hostname) ($(. /etc/os-release && echo "$PRETTY_NAME"))"'
+
+      - name: Copiar la imagen y los manifiestos a la instancia
+        run: |
+          ssh ec2 "rm -rf /var/tmp/deploy-* && mkdir -p '$REMOTE_DIR'"
+          gzip -1 -c "$RUNNER_TEMP/imagen/ms-vehiculos.tar" | ssh ec2 "gunzip > '$REMOTE_DIR/image.tar'"
+          scp "$RUNNER_TEMP/manifiestos/production.yaml" scripts/deploy-k3s.sh "ec2:$REMOTE_DIR/"
+
+      - name: Desplegar en k3s (rolling update con rollback automatico)
+        run: ssh ec2 "bash '$REMOTE_DIR/deploy-k3s.sh' '$REMOTE_DIR'"
+
+      - name: Pruebas de humo contra produccion
+        id: smoke
+        run: |
+          # 1) Desde dentro de la instancia: separa un problema de la app de uno de red (Security Group)
+          if ssh ec2 'curl -fsS --max-time 10 "http://$(hostname -I | cut -d" " -f1)/actuator/health/readiness"' >/dev/null; then
+            echo "✅ La API responde dentro de la EC2"
+          else
+            echo "::error::La API no responde ni siquiera dentro de la EC2"
+            exit 1
+          fi
+          # 2) Desde Internet, como un usuario real
+          if ! bash scripts/smoke-test.sh "http://$EC2_HOST"; then
+            echo "::error::La API responde dentro de la EC2 pero no desde Internet: revisa que el Security Group permita TCP 80"
+            exit 1
+          fi
+
+      - name: Rollback si las pruebas de humo fallan
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: |
+          ssh ec2 "bash -s" <<'EOF'
+          set -euo pipefail
+          REV=$(sudo k3s kubectl -n vehiculos get deploy ms-vehiculos -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')
+          if [ "${REV:-1}" -gt 1 ]; then
+            sudo k3s kubectl -n vehiculos rollout undo deployment/ms-vehiculos
+            sudo k3s kubectl -n vehiculos rollout status deployment/ms-vehiculos --timeout=300s
+          else
+            echo "::warning::Primer despliegue: no hay una revision anterior a la que volver"
+          fi
+          EOF
+
+      - name: Marcar la imagen como "latest" (= version actualmente en produccion)
+        run: |
+          docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:latest"
+
+      - name: Registrar el despliegue
+        id: registro
+        run: |
+          echo "url=http://$EC2_HOST/swagger-ui/index.html" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 🚀 Desplegado en produccion"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Imagen | \`$IMAGE_NAME:$IMAGE_TAG\` |"
+            echo "| Ejecucion | [#$GITHUB_RUN_NUMBER]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) |"
+            echo "| Autor | @$GITHUB_ACTOR |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Eliminar la llave SSH del runner
+        if: always()
+        run: rm -f ~/.ssh/ec2.pem

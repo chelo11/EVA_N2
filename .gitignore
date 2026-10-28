@@ -1,0 +1,14 @@
+# Build
+**/target/
+
+# Secretos y configuracion local: nunca al repositorio
+.env
+*.pem
+*.key
+
+# IDE
+.idea/
+*.iml
+
+# Pauta de la evaluacion (material del curso, no se publica)
+eva2.pdf

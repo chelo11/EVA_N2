@@ -1,0 +1,16 @@
+# Balancea el trafico entre todas las replicas "ready" de la API.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ms-vehiculos
+  labels:
+    app.kubernetes.io/name: ms-vehiculos
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ms-vehiculos
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

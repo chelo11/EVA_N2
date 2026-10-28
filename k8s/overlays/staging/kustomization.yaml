@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Staging: cluster efimero (kind) que el pipeline crea en cada ejecucion para
+# validar la imagen y los manifiestos antes de tocar produccion.
+namespace: vehiculos
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      environment: staging
+    includeSelectors: false
+
+images:
+  - name: ms-vehiculos
+    newName: ghcr.io/chelo11/ms-vehiculos
+    newTag: latest   # scripts/render-manifests.sh lo reemplaza por el SHA del commit

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base comun a todos los entornos. Los overlays (staging / production)
+# solo agregan lo propio de cada uno y fijan la imagen exacta del commit.
+namespace: vehiculos
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ms-vehiculos
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - configmap.yaml
+  - mysql.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml

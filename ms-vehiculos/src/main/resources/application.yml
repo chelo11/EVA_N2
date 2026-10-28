@@ -1,0 +1,35 @@
+# Toda la configuracion sensible llega por variables de entorno
+# (Kubernetes Secret / ConfigMap, docker-compose .env). No hay credenciales en el codigo.
+spring:
+  application:
+    name: ms-vehiculos
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/vehiculos?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: ${JPA_SHOW_SQL:false}
+    open-in-view: false
+  lifecycle:
+    # Tiempo para terminar las peticiones en curso antes de apagar (rolling updates sin cortes)
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${SERVER_PORT:9004}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          # El pod solo recibe trafico si ademas tiene conexion a la base de datos
+          include: readinessState,db

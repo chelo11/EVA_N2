@@ -1,0 +1,19 @@
+# Minimo privilegio en red: solo los pods de la API pueden hablar con MySQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mysql-solo-desde-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ms-vehiculos
+      ports:
+        - protocol: TCP
+          port: 3306

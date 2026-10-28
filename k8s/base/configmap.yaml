@@ -1,0 +1,10 @@
+# Configuracion NO sensible. Usuario y contrasena de la BD viven en el
+# Secret "mysql-credentials", que nunca se versiona (lo crea el pipeline o setup-ec2.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ms-vehiculos-config
+data:
+  DB_URL: "jdbc:mysql://mysql:3306/vehiculos?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+  SERVER_PORT: "9004"
+  JPA_SHOW_SQL: "false"

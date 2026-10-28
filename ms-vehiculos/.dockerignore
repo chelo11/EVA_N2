@@ -1,0 +1,10 @@
+# Solo entra al contexto de build lo que el Dockerfile copia explicitamente
+target/
+.vscode/
+.idea/
+*.iml
+.env
+.env.*
+*.pem
+Dockerfile
+.dockerignore

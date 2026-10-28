@@ -1,0 +1,70 @@
+# Dependabot revisa cada semana las dependencias del proyecto y abre un PR por
+# cada actualizacion. Ese PR pasa por el pipeline (tests, Trivy, staging) antes
+# de poder integrarse.
+# Las alertas de seguridad (Dependabot alerts / security updates) se activan en
+# Settings > Advanced Security del repositorio.
+version: 2
+updates:
+  # Librerias Java (pom.xml)
+  - package-ecosystem: maven
+    directory: /ms-vehiculos
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: America/Santiago
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(maven)"
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot*"
+
+  # Imagenes base del Dockerfile y las de terceros que usan los manifiestos de Kubernetes
+  - package-ecosystem: docker
+    directories:
+      - /ms-vehiculos
+      - /k8s/base
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: America/Santiago
+    commit-message:
+      prefix: "deps(docker)"
+    ignore:
+      # Mantenerse en MySQL 8.4 LTS (la 9.x es la rama "Innovation")
+      - dependency-name: "mysql"
+        update-types: ["version-update:semver-major"]
+      # Imagen propia: su tag lo fija el pipeline con el SHA del commit
+      - dependency-name: "ms-vehiculos"
+
+  # Imagen de MySQL del entorno de desarrollo local
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: America/Santiago
+    commit-message:
+      prefix: "deps(compose)"
+    ignore:
+      - dependency-name: "mysql"
+        update-types: ["version-update:semver-major"]
+
+  # Acciones del pipeline (fijadas por SHA; Dependabot actualiza SHA y comentario de version)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: America/Santiago
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
