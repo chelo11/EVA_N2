@@ -29,8 +29,10 @@ LABEL org.opencontainers.image.title="ms-vehiculos" \
       org.opencontainers.image.description="Microservicio CRUD de vehiculos (Spring Boot 3.5, Java 21)" \
       org.opencontainers.image.source="https://github.com/chelo11/EVA_N2"
 
-# UID/GID numericos: Kubernetes puede verificar runAsNonRoot sin ambiguedad
-RUN addgroup -S -g 10001 app \
+# Parches de seguridad del sistema operativo publicados despues de la imagen base.
+# UID/GID numericos: Kubernetes puede verificar runAsNonRoot sin ambiguedad.
+RUN apk upgrade --no-cache \
+ && addgroup -S -g 10001 app \
  && adduser -S -D -H -u 10001 -G app -s /sbin/nologin app
 
 WORKDIR /app

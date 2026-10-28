@@ -191,17 +191,6 @@ jobs:
           sarif_file: trivy-results.sarif
           category: trivy-imagen
 
-      - name: Trivy - BLOQUEAR si hay vulnerabilidades CRITICAL/HIGH con parche disponible
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          # Excepciones documentadas y con fecha de expiracion (ver el archivo)
-          trivyignores: .github/trivy/trivyignore
-          exit-code: "1"
-
       - name: Imagenes de terceros que corren en el cluster
         id: terceros
         run: |
@@ -244,6 +233,42 @@ jobs:
           image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           format: cyclonedx
           output: sbom-ms-vehiculos.cdx.json
+
+      - name: Trivy - BLOQUEAR si hay vulnerabilidades CRITICAL/HIGH con parche disponible
+        id: trivy-gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: json
+          output: trivy-gate.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Excepciones documentadas y con fecha de expiracion (ver el archivo)
+          trivyignores: .github/trivy/trivyignore
+          exit-code: "1"
+
+      - name: Detalle de las vulnerabilidades que bloquean
+        if: always() && hashFiles('trivy-gate.json') != ''
+        run: |
+          FILAS="$(jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]?
+            | [.Severity, .VulnerabilityID, .PkgName, .InstalledVersion, .FixedVersion, $t] | @tsv' trivy-gate.json)"
+          if [[ -z "$FILAS" ]]; then
+            echo "### ✅ Trivy: sin vulnerabilidades CRITICAL/HIGH con parche disponible" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### ❌ Trivy: vulnerabilidades que bloquean el pipeline"
+            echo ""
+            echo "| Severidad | ID | Paquete | Instalada | Corregida en | Origen |"
+            echo "|---|---|---|---|---|---|"
+            while IFS=$'\t' read -r sev id pkg inst fix tgt; do
+              echo "| $sev | $id | $pkg | $inst | $fix | $tgt |"
+            done <<< "$FILAS"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Tambien como anotaciones, visibles en la pagina de la ejecucion
+          while IFS=$'\t' read -r sev id pkg inst fix tgt; do
+            echo "::error title=Trivy ${sev} ${id}::${pkg} ${inst} -> corregido en ${fix} (${tgt})"
+          done <<< "$FILAS"
 
       - name: Exportar la imagen (la MISMA se promueve a staging y produccion)
         run: |

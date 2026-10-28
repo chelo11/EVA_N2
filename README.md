@@ -153,6 +153,7 @@ staging y en producción.
 | Capas de Spring Boot | `java -Djarmode=tools -jar application.jar extract --layers`: capas `dependencies`, `spring-boot-loader`, `snapshot-dependencies` y `application` copiadas por separado |
 | Caché de dependencias | `COPY pom.xml` + `dependency:go-offline` antes de copiar `src/` |
 | Imagen base | Java 21 y Alpine 3.24 fijados por tag; el tag recibe parches y Dependabot propone las actualizaciones |
+| Parches del SO | `apk upgrade` en la etapa final: incorpora los parches de Alpine publicados después de la imagen base |
 | Usuario | `app`, UID/GID numérico 10001 (no root) |
 | JVM | `-XX:MaxRAMPercentage=60.0 -XX:+ExitOnOutOfMemoryError` |
 | Otros | `HEALTHCHECK` contra `/actuator/health/liveness`; `.dockerignore` excluye `target/`, `.env`, llaves `.pem`; etiquetas OCI (`revision`, `source`, `created`) agregadas por el pipeline |
