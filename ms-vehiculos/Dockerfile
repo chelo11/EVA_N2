@@ -3,7 +3,7 @@
 # =============================================================================
 # Etapa 1 - build: compila el jar con el JDK completo (no llega a la imagen final)
 # =============================================================================
-FROM eclipse-temurin:21-jdk-alpine-3.24 AS build
+FROM eclipse-temurin:24-jdk-alpine-3.22 AS build
 WORKDIR /workspace
 
 # Primero solo lo necesario para resolver dependencias: esta capa queda en cache
@@ -23,7 +23,7 @@ RUN ./mvnw -B -ntp -q package -DskipTests \
 # =============================================================================
 # Etapa 2 - runtime: solo JRE sobre Alpine, usuario sin privilegios
 # =============================================================================
-FROM eclipse-temurin:21-jre-alpine-3.24 AS runtime
+FROM eclipse-temurin:24-jre-alpine-3.22 AS runtime
 
 LABEL org.opencontainers.image.title="ms-vehiculos" \
       org.opencontainers.image.description="Microservicio CRUD de vehiculos (Spring Boot 3.5, Java 21)" \
