@@ -333,6 +333,8 @@ Al terminar la sesión del laboratorio la instancia se detiene; k3s y los datos 
 
 **SonarCloud:** en el proyecto `chelo11_EVA_N2` → *Administration → Analysis Method*, desactivar
 **Automatic Analysis**. El análisis lo hace el pipeline; si queda activo, el job 2 falla.
+El **primer** análisis de un proyecto nuevo no calcula el Quality Gate (estado `NONE`, sin código nuevo con qué
+comparar) y el job 2 falla; desde el segundo análisis el Quality Gate se evalúa normalmente.
 
 **GitHub** → *Settings → Secrets and variables → Actions*:
 
@@ -344,8 +346,8 @@ Al terminar la sesión del laboratorio la instancia se detiene; k3s y los datos 
 | `EC2_USER` | Variable o Secret (opcional) | `ubuntu` (valor por defecto) |
 | `EC2_KNOWN_HOSTS` | Secret (opcional) | Huella SSH fijada: salida de `ssh-keyscan -t ed25519 <IP>`. Se asocia a un alias, así que sigue sirviendo si cambia la IP |
 
-**GitHub** → *Settings → Advanced Security*: activar **Dependabot alerts**, **Dependabot security updates** y
-**Secret scanning**. En *Settings → Rules*, una regla para `main` que exija los checks del pipeline antes de integrar un PR.
+**GitHub** → *Settings → Advanced Security*: activar **Dependency graph** (lo requiere el job de revisión de
+dependencias), **Dependabot alerts**, **Dependabot security updates** y **Secret scanning**. En *Settings → Rules*, una regla para `main` que exija los checks del pipeline antes de integrar un PR.
 
 ## 13. Declaración de uso de IA
 

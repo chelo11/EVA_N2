@@ -20,6 +20,13 @@ updates:
       spring-boot:
         patterns:
           - "org.springframework.boot*"
+    ignore:
+      # Los saltos de version mayor (Spring Boot 4, springdoc 3) requieren migrar codigo:
+      # se planifican a mano. Dependabot sigue proponiendo parches y versiones menores.
+      - dependency-name: "org.springframework.boot*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.springdoc*"
+        update-types: ["version-update:semver-major"]
 
   # Imagenes base del Dockerfile y las de terceros que usan los manifiestos de Kubernetes
   - package-ecosystem: docker
@@ -39,6 +46,9 @@ updates:
         update-types: ["version-update:semver-major"]
       # Imagen propia: su tag lo fija el pipeline con el SHA del commit
       - dependency-name: "ms-vehiculos"
+      # Mantenerse en Java 21 LTS (Dependabot propone versiones no-LTS como la 24)
+      - dependency-name: "eclipse-temurin"
+        update-types: ["version-update:semver-major"]
 
   # Imagen de MySQL del entorno de desarrollo local
   - package-ecosystem: docker-compose
