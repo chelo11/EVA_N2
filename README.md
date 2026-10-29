@@ -260,19 +260,10 @@ Manifiestos con **Kustomize**: una base común ([`k8s/base`](k8s/base)) y un *ov
 Docker Compose ([`docker-compose.yml`](docker-compose.yml)) se usa solo para el desarrollo local.
 
 ## 10. Justificación técnica de las decisiones
-
-> ✍️ **Sección a redactar por el equipo, sin apoyo de IA** (la pauta exige que las justificaciones técnicas sean propias).
-> Decisiones a justificar:
->
-> - Kubernetes (k3s / kind) en vez de solo Docker Compose para la orquestación.
-> - SonarCloud en vez de Snyk, y su complemento con Dependabot y Trivy.
-> - Imagen multi-stage, JRE Alpine, capas de Spring Boot y usuario no-root.
-> - Construir la imagen una vez y promover el mismo archivo a staging y producción.
-> - Staging efímero en kind antes de producción.
-> - Umbrales de cobertura (80 % / 70 %) y uso del Quality Gate.
-> - Valores del HPA, `requests`/`limits`, `ResourceQuota` y estrategia de *rolling update*.
-> - Acciones fijadas por SHA y la excepción documentada de Trivy para Spring Framework 6.2.
-> - Puerto 22 abierto para el despliegue por SSH desde GitHub Actions.
+> - 
+> - Kubernetes (k3s / kind) en vez de solo Docker Compose para la orquestación.Bueno, docker compose es exelente para levantar entornos de desarrollo locales de manera rápida, pero no cuenta con los mecanismos nativos para autorepararse, ni escalado automatico ni gestion del trafico en producción, Usar kubernetes nos permite simular y operar un entorno real de produccion, aprovechando funciones como la del balanceo de carga, su alta disponibilidad y gestion declarativa.
+> - SonarCloud en vez de Snyk, y su complemento con Dependabot y Trivy: elegimos sonarcloud principalmente por su capacidad superios para analizar la calidad interna del codigo fuente, para no descuidar la seguridad de las librerias externas y de las imagenes, lo complementamos con dependabot que actualiza las dependencias obsolestas automaticamente en github y trivy que escanea vulnerabilidadesen los paquetes del sistema operativo e imagenes docker.
+> - Puerto 22 abierto para el despliegue por SSH desde GitHub Actions, por una necesidad operativa mas que nada ya que es temporal para el corredor de github action pueda conectarse mediante ssh de manera segura al server y ejecutar lo comandos de despliegue. Para la seguridad se restringe el acceso con una autenticacion por clave privada, además de dejar el puerto 80 abierto para el trafico de HTTP.
 
 _(Pendiente: redactar por el equipo.)_
 
