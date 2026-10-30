@@ -364,7 +364,11 @@ Declaración realizada según la pauta y la guía de [bibliotecas.duoc.cl/ia](ht
 | Claude (Anthropic), vía Claude Code | Generó borradores de: Dockerfile, workflow de GitHub Actions, configuración de Dependabot, manifiestos de Kubernetes, scripts (`scripts/`, `infra/`), `docker-compose.yml`, pruebas de los controladores y las partes descriptivas de este README (secciones 1 a 9, 11 y 12). En las secciones 10 y 14 la IA solo dejó los títulos y la lista de temas a justificar; su contenido lo redacta el equipo. En la sección 10 la IA además corrigió formato y ortografía, sin cambiar las ideas ni las justificaciones del equipo. |
 
 _(Pendiente: el equipo describe qué revisó, ejecutó y modificó de ese contenido.
-Se levanta la instancia de AWS, donde se cambia de una t3.micro a una t3 medium, ya que la t3 micro tenia 908 MB de RAM y ya usaba 404 MB antes de instalar nada y se necesitaba correr MySQL, donde cada pod de la API usa unos 220 MiB, MYSQL unos 230
+Se levanta la instancia de AWS, donde se cambia de una t3.micro a una t3 medium, ya que la t3 micro tenia 908 MB de RAM y ya usaba 404 MB antes de instalar nada y se necesitaba correr MySQL, donde cada pod de la API usa unos 220 MiB, MYSQL unos 230 y el nodo completo unos 1.9 GB.
+Las reservas suman 1.280MiB y la t3 medium tiene 4gb y 2vCPU, por eso se amplia el disco a 20 Gb así quedan 13 GB libres, ademas dentro de el levantamiento de la instancia tenia una IP publica que cada vez que se reincia la instancia cambia automaticamente, por eso el pipeline se guarda en el EC2-HOST con una ip fija o elasctica , se reinicia el laboratorio y produccion volvio sola en un aproximado de 40 segundos sin tocar nada.
+En cuanto a los puertos 22 y 80 , el pipeline usa el 22 para desplegar por SSH, mientras que los runners de GitHub no tiene una ip fija y la entrada es solo con la llave privada .pem, el puerto 80, es por donde Traefik, el ingress publica la API a los usuarios y el pipeline hace una prueba desde internet ue detecta si el 80 esta cerrado.
+Se desactivo el Automatic Analysus de SonarCloud, ya que sis e ejecuta el analisis desde el pipeline con el analisis automatico activo, el job falla. El analisis automatico no lee la cobertura de Jacoco que es una de sus politicas de calidad y el Dependency graph se activa, sin el, el job de revision de dependecias fallaba en todos los pull.
+Se aprobó la instalacion de k3s en la instancia y los merges a main , y el sistema incluso bloqueo que yo hiciera los merges sin revision, lo que ayudo como autentificador de dos pasos.
 
 
 Referencia: Anthropic. (2026). *Claude* (versión Opus 5.5) [Modelo de lenguaje de gran tamaño]. https://claude.ai
@@ -373,12 +377,12 @@ Referencia: Anthropic. (2026). *Claude* (versión Opus 5.5) [Modelo de lenguaje 
 
 ### Conclusiones del equipo
 
-_(Pendiente: redactar por el equipo.)_
+Como equipo, podemos concluir que el pipeline implementado cumple de forma solida con su objetivo fundamental, garantiza el flujo de integración y despliegue continuo automatizado y auditable, consideramos que el valor real de esta evaluación no estuvo en que el código corriera, sino mas bien en comprobar como la automatización actuó como una red de seguridad y validamos el self-healing de kubernetes cuando se logro reestablecer sola en unos 40 segundos tras reiniciar el laboratorio, asique despues de todo quedamos a la espera de poder seguir practicando y mejorando nuestras habilidades en este ambito para tambien mejorar nuestro entendimiento sobre estas practicas.
 
 ### Reflexión individual · Marcelo Acevedo Alarcón
 
-_(Pendiente: aprendizaje y contribución al proyecto.)_
+Creo que entendí con esto la diferencia de que "algo funcione en mi PC" y "el sistema esta en producción", porque digo esto, porque yo que me encargue de levantar la instancia, lo viví directamente con la infraestructura de AWS , en mi equipo el servicio de momento levanto bien, pero llevarlo a la t3 micro en AWS el servidor colapsaba, la RAM de 907MB no alcanzaba para correr lo que necesitábamos, asique se tomo la decisión de escalar a una t3.medium y ampliar el disco, además de que la ip cambiaba cada vez que reincibamos, se cortaban los despliegues hasta que configure una Elastic IP para que se estabilize. Sumado a esto comento tambien lo que me costo entender que fue el comportamiento de los Pod de kubernetes, aun me cuesta un poco pero comprendi que el autoescalado no se configura solo con formas teoricas, sino que ajustando las metricas con datos de consumo reales y bueno la IA fue demasiado util para sugerir y cumplir con algunos pasos que me costaba hacer o no comprendia.
 
 ### Reflexión individual · Daniel Ríos Valle
 
-_(Pendiente: aprendizaje y contribución al proyecto.)_
+Mi contribucion principal estuvo en el pipeline de Github, con la seguridad de las dependencias y ayudar a revisar el codigo, aunque derrepente el problema que me marco fue cuando el trivy bloqueo el build por vulnerabilidades, sumado al fallo inicial del SonarCloud porque no encontraba el codigo nuevo con el cual comparar en el quality gate, asique me toco actualizar las librerias a versiones seguras, aprendi a la fuerza que la seguridad en la cadena de sumnistro cuando fijamos las acciones en github por sha y la IA nos ayudo en varios manifiestos de kubertenets pero fue completamente incapaz de aplciar criterios de gobernanza, por lo que nosotros fuimos quienes ejercimos la aprobacion humana de decidir que riesgos asumir en las dependencias.
