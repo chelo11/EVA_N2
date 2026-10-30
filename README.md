@@ -363,7 +363,9 @@ Declaración realizada según la pauta y la guía de [bibliotecas.duoc.cl/ia](ht
 |---|---|
 | Claude (Anthropic), vía Claude Code | Generó borradores de: Dockerfile, workflow de GitHub Actions, configuración de Dependabot, manifiestos de Kubernetes, scripts (`scripts/`, `infra/`), `docker-compose.yml`, pruebas de los controladores y las partes descriptivas de este README (secciones 1 a 9, 11 y 12). En las secciones 10 y 14 la IA solo dejó los títulos y la lista de temas a justificar; su contenido lo redacta el equipo. En la sección 10 la IA además corrigió formato y ortografía, sin cambiar las ideas ni las justificaciones del equipo. |
 
-_(Pendiente: el equipo describe qué revisó, ejecutó y modificó de ese contenido.)_
+_(Pendiente: el equipo describe qué revisó, ejecutó y modificó de ese contenido.
+Se levanta la instancia de AWS, donde se cambia de una t3.micro a una t3 medium, ya que la t3 micro tenia 908 MB de RAM y ya usaba 404 MB antes de instalar nada y se necesitaba correr MySQL, donde cada pod de la API usa unos 220 MiB, MYSQL unos 230
+
 
 Referencia: Anthropic. (2026). *Claude* (versión Opus 5.5) [Modelo de lenguaje de gran tamaño]. https://claude.ai
 
