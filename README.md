@@ -264,8 +264,21 @@ Docker Compose ([`docker-compose.yml`](docker-compose.yml)) se usa solo para el 
 > - Kubernetes (k3s / kind) en vez de solo Docker Compose para la orquestación.Bueno, docker compose es exelente para levantar entornos de desarrollo locales de manera rápida, pero no cuenta con los mecanismos nativos para autorepararse, ni escalado automatico ni gestion del trafico en producción, Usar kubernetes nos permite simular y operar un entorno real de produccion, aprovechando funciones como la del balanceo de carga, su alta disponibilidad y gestion declarativa.
 > - SonarCloud en vez de Snyk, y su complemento con Dependabot y Trivy: elegimos sonarcloud principalmente por su capacidad superios para analizar la calidad interna del codigo fuente, para no descuidar la seguridad de las librerias externas y de las imagenes, lo complementamos con dependabot que actualiza las dependencias obsolestas automaticamente en github y trivy que escanea vulnerabilidadesen los paquetes del sistema operativo e imagenes docker.
 > - Puerto 22 abierto para el despliegue por SSH desde GitHub Actions, por una necesidad operativa mas que nada ya que es temporal para el corredor de github action pueda conectarse mediante ssh de manera segura al server y ejecutar lo comandos de despliegue. Para la seguridad se restringe el acceso con una autenticacion por clave privada, además de dejar el puerto 80 abierto para el trafico de HTTP.
-
-_(Pendiente: redactar por el equipo.)_
+> - Imagen multi-stage, JRE Alpine, capas de spring boot y usuario no-root:
+    -Multi-stage, nos permite compilar el proyecto en una etapa temporal y copiar solo el archivo       final que termina en .jar a la imagen definitiva, evitando incluir herramientas de                 compilacion pesadas.
+    -JRE Alpine: reduce el tamaño de la imagen al minimo, al usar una base ejecutable de Java           sobre una distribucion liviana de Linux, mejorando la rapidez de descarga e inicio.
+    -Capas de spring boot: Separa las dependencias que cambian poco del codigo de la aplicacion         que cambia seguido, se aprovecha el cache del docker para acelerar las contrucciones.
+    -Usuario no-root: Evita que el contenedor ejecute la aplciacion con privilegios de 
+     administrador "root", de modo que si un atacante compromete el contenedor, no tenga control 
+     sobre el sistema operativo host.
+> - Construir la imagen una vez y promover el mismo archivo a starging y producción, garantizando que la misma imagen que fue probada con éxito en staging sea el que se despliegue en producción, eliminando el riesgo de si funciona en la maquina o fallos por diferencias en el proceso de compilación entre entornos.
+> - Staging efímero en kind antes de producción: crear un entorno de staging temporal (quiere decir que se crea , se prueba y se destruye durante el pipeline de CI/CD) en kind el cual permite validar el comportamiento real dentro del kubernetes de forma económica y limpia, Asegura que no queden residuos de pruebas anteriores que puedan afectar a los nuevos despliegues.
+> - Umbrales de cobertura (80% / 70%) y uso del quality gate, este actúa como filtro automático que bloquea el código que no cumple con los estándares mínimos de calidad. Establecer un umbral mas alto para el código nuevo asegura que el proyecto se mantenga testeado a medida que evoluciona, evitando la acumulación de costo adicional de desarrollo.
+> - Valores del HPA y estrategia de rolling update:
+    -request / limits: Indican a Kubernetes cuanta CPU y memoria necesita garantizar la app y cual      es el tope máximo que puede consumir para no dejar sin recursos a otros servicios.                - ResourceQuota : Delimita el uso total del clúster por namespace para prevenir sobrecostos o       saturación accidental.                                                                            - HPA (horizontal pod autoscaler): aumenta o disminuye automaticamente el numero de replicas         de la aplicacion segun carga de trabajo.                                                         - Rolling update: permite actualizar la aplicacion sustituyendo pod por pod de manera gradual,       logrando que el servicio se actualice sin interrupciones ni tiempo de caida (pod : es un           grupo de uno o mas contenedores que comparten almacenamiento, red y especificaciones de            ejecución)
+> - Acciones fijadas por SHA y la excepcion documentada de trivy para spring Framework 
+    - SHA fijado en las github actions, apuntar a un commit exacto en ligar de una etiqueta de version , evita cambios maliciosos o fallos imprevistos introducidos por los creadores de action afecten nuestro pipeline.
+>   Exepcion de trivy: se documenta la exepcion de la vulnerabilidad en sping framework tras verificar que es un falso positivo o un riesgo aceptado temporalmete mientras el proveedor libera un parche, evitando bloquear el despliegue de manera innecesaria.
 
 ## 11. Cómo ejecutarlo
 
@@ -343,7 +356,7 @@ dependencias), **Dependabot alerts**, **Dependabot security updates** y **Secret
 
 ## 13. Declaración de uso de IA
 
-> ⚠️ **Sección a revisar y completar por el equipo** según la pauta y [bibliotecas.duoc.cl/ia](https://bibliotecas.duoc.cl/ia).
+> según la pauta y [bibliotecas.duoc.cl/ia](https://bibliotecas.duoc.cl/ia).
 
 | Herramienta | Uso |
 |---|---|
@@ -355,7 +368,7 @@ Referencia: Anthropic. (2026). *Claude* (versión Opus 5.5) [Modelo de lenguaje 
 
 ## 14. Conclusiones y reflexiones individuales
 
-> ✍️ Según la pauta, esta sección **debe ser redactada por cada integrante sin apoyo de IA**.
+> 
 
 ### Conclusiones del equipo
 
