@@ -21,10 +21,12 @@ spec:
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0
+      # 1 pod por minuto: el pico de CPU del arranque de la JVM (p.ej. al encender el
+      # laboratorio) dura menos de un minuto y no alcanza a llevar el HPA al maximo.
       policies:
         - type: Pods
-          value: 2
-          periodSeconds: 30
+          value: 1
+          periodSeconds: 60
     scaleDown:
       # Espera 5 min de carga baja antes de quitar pods (evita oscilaciones)
       stabilizationWindowSeconds: 300
